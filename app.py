@@ -16,7 +16,7 @@ import json  # <-- 1. IMPORTAMOS JSON (PARTE DE LA CORRECCIÓN)
 # (Recuerda cambiar el ID de la carpeta)
 NOMBRE_GOOGLE_SHEET = "base_datos_cursos"
 ARCHIVO_PLANTILLA = "plantilla_acta.docx"
-ID_CARPETA_DRIVE_SALIDA = "https://drive.google.com/drive/folders/1rd4YqqvlOhn3Itz832sBiMjpWp31WZWY"
+ID_CARPETA_DRIVE_SALIDA = "https://drive.google.com/drive/folders/1vEy9N4ZcMRnmBQ0q5WgzqhBP-Ng8XCSN"
 
 
 # --- 2. AUTENTICACIÓN CON GOOGLE (CORREGIDA) ---
