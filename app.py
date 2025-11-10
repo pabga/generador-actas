@@ -4,60 +4,71 @@ import pandas as pd
 from docxtpl import DocxTemplate
 import io
 import sys
-from num2words import num2words  # Necesario para la conversión
+from num2words import num2words
 import datetime
+import gspread  # <-- Nuevo
+from oauth2client.service_account import ServiceAccountCredentials # <-- Nuevo
+from pydrive2.auth import GoogleAuth # <-- Nuevo
+from pydrive2.drive import GoogleDrive # <-- Nuevo
 
 # --- 1. CONFIGURACIÓN INICIAL ---
-ARCHIVO_EXCEL = "base_datos_cursos.xlsx"
+# (Ya no usamos el archivo Excel, usamos el nombre del Google Sheet)
+NOMBRE_GOOGLE_SHEET = "base_datos_cursos" 
 ARCHIVO_PLANTILLA = "plantilla_acta.docx"
+# Pega aquí el ID de la CARPETA de Drive donde se guardarán las actas
+ID_CARPETA_DRIVE_SALIDA = "Poner-el-ID-de-tu-carpeta-de-Drive-aqui" 
 
+# --- 2. AUTENTICACIÓN CON GOOGLE ---
+@st.cache_resource
+def autorizar_google_apis():
+    scope = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds_json = st.secrets["google_credentials"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
+    gc = gspread.authorize(creds)
 
-# --- 2. FUNCIÓN DE FORMATEO (ACTUALIZADA) ---
+    # Autorizar PyDrive (para subir archivos)
+    gauth = GoogleAuth()
+    gauth.credentials = creds
+    drive = GoogleDrive(gauth)
+
+    return gc, drive
+
+# gc: Google Client (para Sheets)
+# drive: Google Drive (para Files)
+try:
+    gc, drive = autorizar_google_apis()
+except Exception as e:
+    st.error(f"Error al conectar con Google APIs. ¿Configuraste los 'Secrets' de Streamlit? Detalle: {e}")
+    st.stop()
+
+# --- FUNCIÓN DE FORMATEO (sin cambios) ---
 def formatear_nota_especial(nota_str):
-    """
-    Toma un string como "4" o "4,25" y lo convierte a:
-    - 4 (Cuatro) si es entero
-    - 4,25 (Cuatro/25) si tiene decimales
-    """
+    # ... (copia tu función de formato de nota aquí) ...
+    # (La que tiene 4 (Cuatro) y 4,25 (Cuatro/25))
     if not nota_str or nota_str.strip() == "":
         return "AUSENTE"
-
-    # Unificar la entrada (reemplazar coma por punto)
     nota_limpia = nota_str.strip().replace(",", ".")
-
     try:
         nota_num = float(nota_limpia)
     except ValueError:
-        # Si el usuario escribe "AUSENTE" o algo que no es un número
         return nota_str.upper()
 
-    # --- Aquí ocurre la nueva magia ---
-
-    # 1. Separar parte entera y decimal
     parte_entera = int(nota_num)
-    # (Usamos round() para evitar problemas de precisión)
     parte_decimal = int(round((nota_num - parte_entera) * 100))
-
-    # 2. Convertir la parte entera a palabras en español
     try:
         palabra_entera = num2words(parte_entera, lang='es').capitalize()
     except Exception:
-        palabra_entera = str(parte_entera)  # Fallback
+        palabra_entera = str(parte_entera)
 
-    # 3. Decidir el formato final
     if parte_decimal == 0:
-        # Si es un número entero (ej: 4.0)
-        # Devolvemos "4 (Cuatro)"
         return f"{parte_entera} ({palabra_entera})"
     else:
-        # Si tiene decimales (ej: 4.25)
-        # Formateamos el número a "4,25"
         nota_formateada_coma = f"{nota_num:.2f}".replace(".", ",")
-        # Formateamos los decimales a "25"
         decimal_dos_digitos = f"{parte_decimal:02d}"
-        # Devolvemos "4,25 (Cuatro/25)"
         return f"{nota_formateada_coma} ({palabra_entera}/{decimal_dos_digitos})"
-
 
 # --- Cargar plantilla (sin cambios) ---
 try:
@@ -66,90 +77,69 @@ except Exception as e:
     st.error(f"ERROR: No se pudo cargar la plantilla '{ARCHIVO_PLANTILLA}'. {e}")
     st.stop()
 
-# --- Cargar las 3 hojas del Excel (sin cambios) ---
-try:
-    df_cursos = pd.read_excel(ARCHIVO_EXCEL, sheet_name="Cursos", dtype=str)
-    df_alumnos = pd.read_excel(ARCHIVO_EXCEL, sheet_name="Alumnos", dtype=str)
-    df_inscripciones = pd.read_excel(ARCHIVO_EXCEL, sheet_name="Inscripciones", dtype=str)
-except FileNotFoundError:
-    st.error(f"ERROR: No se encontró el archivo Excel '{ARCHIVO_EXCEL}'.")
-    st.stop()
-except Exception as e:
-    st.error(
-        f"ERROR: No se pudo leer el Excel. Asegúrate de tener las hojas 'Cursos', 'Alumnos' e 'Inscripciones'. Detalle: {e}")
-    st.stop()
+# --- 3. LEER DATOS DESDE GOOGLE SHEETS ---
+@st.cache_data(ttl=600) # Cachear por 10 minutos
+def cargar_datos_google_sheets():
+    try:
+        # Abrir el Google Sheet por su nombre
+        sh = gc.open(NOMBRE_GOOGLE_SHEET)
 
-# --- 2. INTERFAZ DE STREAMLIT (NUEVA LÓGICA) ---
+        # Cargar cada hoja en un DataFrame de Pandas
+        df_cursos = pd.DataFrame(sh.worksheet("Cursos").get_all_records())
+        df_alumnos = pd.DataFrame(sh.worksheet("Alumnos").get_all_records())
+        df_inscripciones = pd.DataFrame(sh.worksheet("Inscripciones").get_all_records())
+
+        # Convertir todo a string por seguridad (Pandas a veces adivina mal)
+        df_cursos = df_cursos.astype(str)
+        df_alumnos = df_alumnos.astype(str)
+        df_inscripciones = df_inscripciones.astype(str)
+
+        return df_cursos, df_alumnos, df_inscripciones
+    except Exception as e:
+        st.error(f"ERROR: No se pudo leer el Google Sheet '{NOMBRE_GOOGLE_SHEET}'. ¿Lo compartiste con el email de la cuenta de servicio? Detalle: {e}")
+        st.stop()
+
+df_cursos, df_alumnos, df_inscripciones = cargar_datos_google_sheets()
+
+# --- 4. INTERFAZ DE STREAMLIT (sin cambios) ---
+# ... (todo tu código de st.title, st.sidebar.radio, st.selectbox, etc. va aquí) ...
+# ... (exactamente como lo tenías) ...
 st.title("🚀 Generador de Actas de Examen")
-
-# --- PASO 1: Preguntar el Tipo de Examen ---
 st.sidebar.markdown("## Datos del Acta")
-tipo_seleccionado = st.sidebar.radio(
-    "1. Seleccione el tipo de acta:",
-    ("FINAL", "PARCIAL")
-)
-
-# --- PASO 2: Selector de Fecha Manual ---
-fecha_examen_seleccionada = st.sidebar.date_input(
-    "2. Seleccione la Fecha del Examen",
-    datetime.date.today()
-)
-
-# --- PASO 3: Selector de Curso ---
-lista_nombres_cursos = df_cursos['NombreCurso'].unique()
-curso_seleccionado_nombre = st.selectbox(
-    "3. Seleccione el Curso:",
-    lista_nombres_cursos
-)
-
-# --- PASO 4: Selector de Asignatura ---
+tipo_seleccionado = st.sidebar.radio("1. Seleccione el tipo de acta:", ("Final", "Parcial"))
+fecha_examen_seleccionada = st.sidebar.date_input("2. Seleccione la Fecha del Examen", datetime.date.today())
+lista_nombres_cursos = df_cursos['NombreCurso'].unique() 
+curso_seleccionado_nombre = st.selectbox("3. Seleccione el Curso:", lista_nombres_cursos)
 if curso_seleccionado_nombre:
-    materias_del_curso = df_cursos[
-        df_cursos['NombreCurso'] == curso_seleccionado_nombre
-        ]['Asignatura'].unique()
-
-    asignatura_seleccionada = st.selectbox(
-        "4. Seleccione la Asignatura:",
-        materias_del_curso
-    )
+    materias_del_curso = df_cursos[df_cursos['NombreCurso'] == curso_seleccionado_nombre]['Asignatura'].unique()
+    asignatura_seleccionada = st.selectbox("4. Seleccione la Asignatura:", materias_del_curso)
 
 # --- 5. FILTRAR ALUMNOS (Lógica de Grupo) ---
 if curso_seleccionado_nombre and asignatura_seleccionada:
-
-    # a. Obtener el ID_CURSO
     try:
-        curso_final_serie = df_cursos[
-            (df_cursos['NombreCurso'] == curso_seleccionado_nombre) &
-            (df_cursos['Asignatura'] == asignatura_seleccionada)
-            ].iloc[0]
+        curso_final_serie = df_cursos[(df_cursos['NombreCurso'] == curso_seleccionado_nombre) & (df_cursos['Asignatura'] == asignatura_seleccionada)].iloc[0] 
     except IndexError:
         st.error("Error: No se encontró esa combinación de Curso y Asignatura.")
         st.stop()
 
     info_curso_dict = curso_final_serie.to_dict()
-    id_curso_seleccionado = info_curso_dict['ID_CURSO']
-
+    id_curso_seleccionado = info_curso_dict['ID_CURSO'] 
     st.subheader(f"Cargar notas para: {asignatura_seleccionada} ({tipo_seleccionado})")
     st.caption(f"Curso: {curso_seleccionado_nombre} | ID: {id_curso_seleccionado}")
 
-    # b. Encontrar los GRUPOS inscriptos a este ID_CURSO
     grupos_inscriptos_df = df_inscripciones[df_inscripciones['ID_CURSO'] == id_curso_seleccionado]
     lista_grupos = grupos_inscriptos_df['Grupo'].unique()
 
     if len(lista_grupos) == 0:
-        st.warning(
-            f"No hay ningún 'Grupo' inscripto a este curso (ID: {id_curso_seleccionado}) en la hoja 'Inscripciones'.")
+        st.warning(f"No hay ningún 'Grupo' inscripto a este curso (ID: {id_curso_seleccionado}) en la hoja 'Inscripciones'.")
         st.stop()
 
-    # c. Traer a TODOS los alumnos que pertenecen a esos grupos
     alumnos_del_curso = df_alumnos[df_alumnos['Grupo'].isin(lista_grupos)].copy()
     alumnos_del_curso = alumnos_del_curso.drop_duplicates(subset=['DNI'])
 
     if alumnos_del_curso.empty:
-        st.warning(
-            f"Se encontraron grupos ({', '.join(lista_grupos)}) pero no hay alumnos en la hoja 'Alumnos' que pertenezcan a ellos.")
+        st.warning(f"Se encontraron grupos ({', '.join(lista_grupos)}) pero no hay alumnos en la hoja 'Alumnos' que pertenezcan a ellos.")
     else:
-        # --- Formulario de Notas (sin cambios) ---
         with st.form("notas_form"):
             notas_ingresadas = {}
             st.write("**5. Ingrese la nota numérica (ej: 9,50 o 7):**")
@@ -160,49 +150,50 @@ if curso_seleccionado_nombre and asignatura_seleccionada:
                 nota = st.text_input(f"Nota para: **{nombre}** (DNI: {dni})", key=dni)
                 notas_ingresadas[dni] = nota
 
-            submitted = st.form_submit_button("Generar Acta")
+            submitted = st.form_submit_button("Generar Acta y Subir a Drive")
 
 # --- 6. LÓGICA DE GENERACIÓN (MODIFICADA) ---
 if 'submitted' in locals() and submitted:
 
-    # a. Preparar el contexto (datos del curso)
     context = info_curso_dict
-
-    # b. Agregar los datos manuales (Tipo y Fecha)
-    context['TipodeExamen'] = tipo_seleccionado  # (Corregido)
+    context['TipodeExamen'] = tipo_seleccionado
     context['FechaExamen'] = fecha_examen_seleccionada.strftime("%d/%m/%Y")
 
-    # c. Preparar la lista de alumnos (con la nueva función)
     lista_alumnos_para_plantilla = []
-
     for index, alumno in alumnos_del_curso.iterrows():
         alumno_dict = alumno.to_dict()
-        nota_ingresada_str = notas_ingresadas.get(alumno['DNI'], "")
-
-        # Aplicamos la nueva función de formato
-        nota_transformada = formatear_nota_especial(nota_ingresada_str)
-
+        nota_ingresada_str = notas_ingresadas.get(alumno['DNI'], "") 
+        nota_transformada = formatear_nota_especial(nota_ingresada_str) 
         alumno_dict['resultado'] = nota_transformada
         lista_alumnos_para_plantilla.append(alumno_dict)
 
     context['alumnos'] = lista_alumnos_para_plantilla
 
-    # --- Renderizar y Descargar (sin cambios) ---
     try:
+        # Renderizar el documento en memoria
         doc.render(context)
         file_buffer = io.BytesIO()
         doc.save(file_buffer)
-        file_buffer.seek(0)
+        file_buffer.seek(0) # Rebobinar el buffer
 
         nombre_archivo = f"ACTA_{info_curso_dict.get('Asignatura', 'CURSO')}_{id_curso_seleccionado}.docx"
-        st.success(f"✅ ¡Acta generada con éxito!")
 
-        st.download_button(
-            label=f"Descargar {nombre_archivo}",
-            data=file_buffer,
-            file_name=nombre_archivo,
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
+        # --- ¡NUEVO! Subir el archivo a Google Drive ---
+        with st.spinner(f"Subiendo '{nombre_archivo}' a Google Drive..."):
+            # Crear el archivo en Google Drive
+            drive_file = drive.CreateFile({
+                'title': nombre_archivo,
+                'parents': [{'id': ID_CARPETA_DRIVE_SALIDA}],
+                'mimeType': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            })
+
+            # Asignar el contenido del buffer
+            drive_file.content = file_buffer
+            drive_file.Upload() # Subir
+
+        st.success(f"✅ ¡Éxito! Se guardó '{nombre_archivo}' en tu carpeta de Google Drive.")
+        st.balloons()
+
     except Exception as e:
-        st.error(f"ERROR: Ocurrió un problema al 'renderizar' la plantilla Word.")
+        st.error(f"ERROR: Ocurrió un problema al 'renderizar' o 'subir' el archivo.")
         st.error(f"Detalle: {e}")
