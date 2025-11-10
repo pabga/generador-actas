@@ -13,10 +13,10 @@ from pydrive2.drive import GoogleDrive # <-- Nuevo
 
 # --- 1. CONFIGURACIÓN INICIAL ---
 # (Ya no usamos el archivo Excel, usamos el nombre del Google Sheet)
-NOMBRE_GOOGLE_SHEET = "base_datos_cursos" 
+NOMBRE_GOOGLE_SHEET = "base_datos_cursos"
 ARCHIVO_PLANTILLA = "plantilla_acta.docx"
 # Pega aquí el ID de la CARPETA de Drive donde se guardarán las actas
-ID_CARPETA_DRIVE_SALIDA = "Poner-el-ID-de-tu-carpeta-de-Drive-aqui" 
+ID_CARPETA_DRIVE_SALIDA = "https://drive.google.com/drive/folders/1rd4YqqvlOhn3Itz832sBiMjpWp31WZWY"
 
 # --- 2. AUTENTICACIÓN CON GOOGLE ---
 @st.cache_resource
@@ -108,7 +108,7 @@ st.title("🚀 Generador de Actas de Examen")
 st.sidebar.markdown("## Datos del Acta")
 tipo_seleccionado = st.sidebar.radio("1. Seleccione el tipo de acta:", ("Final", "Parcial"))
 fecha_examen_seleccionada = st.sidebar.date_input("2. Seleccione la Fecha del Examen", datetime.date.today())
-lista_nombres_cursos = df_cursos['NombreCurso'].unique() 
+lista_nombres_cursos = df_cursos['NombreCurso'].unique()
 curso_seleccionado_nombre = st.selectbox("3. Seleccione el Curso:", lista_nombres_cursos)
 if curso_seleccionado_nombre:
     materias_del_curso = df_cursos[df_cursos['NombreCurso'] == curso_seleccionado_nombre]['Asignatura'].unique()
@@ -117,13 +117,13 @@ if curso_seleccionado_nombre:
 # --- 5. FILTRAR ALUMNOS (Lógica de Grupo) ---
 if curso_seleccionado_nombre and asignatura_seleccionada:
     try:
-        curso_final_serie = df_cursos[(df_cursos['NombreCurso'] == curso_seleccionado_nombre) & (df_cursos['Asignatura'] == asignatura_seleccionada)].iloc[0] 
+        curso_final_serie = df_cursos[(df_cursos['NombreCurso'] == curso_seleccionado_nombre) & (df_cursos['Asignatura'] == asignatura_seleccionada)].iloc[0]
     except IndexError:
         st.error("Error: No se encontró esa combinación de Curso y Asignatura.")
         st.stop()
 
     info_curso_dict = curso_final_serie.to_dict()
-    id_curso_seleccionado = info_curso_dict['ID_CURSO'] 
+    id_curso_seleccionado = info_curso_dict['ID_CURSO']
     st.subheader(f"Cargar notas para: {asignatura_seleccionada} ({tipo_seleccionado})")
     st.caption(f"Curso: {curso_seleccionado_nombre} | ID: {id_curso_seleccionado}")
 
@@ -162,8 +162,8 @@ if 'submitted' in locals() and submitted:
     lista_alumnos_para_plantilla = []
     for index, alumno in alumnos_del_curso.iterrows():
         alumno_dict = alumno.to_dict()
-        nota_ingresada_str = notas_ingresadas.get(alumno['DNI'], "") 
-        nota_transformada = formatear_nota_especial(nota_ingresada_str) 
+        nota_ingresada_str = notas_ingresadas.get(alumno['DNI'], "")
+        nota_transformada = formatear_nota_especial(nota_ingresada_str)
         alumno_dict['resultado'] = nota_transformada
         lista_alumnos_para_plantilla.append(alumno_dict)
 
