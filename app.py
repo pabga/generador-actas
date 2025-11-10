@@ -2,108 +2,104 @@
 import streamlit as st
 import pandas as pd
 from docxtpl import DocxTemplate
-import io, sys, json, datetime
+import io
+import sys
 from num2words import num2words
+import datetime
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+# ¡Ya no se necesita oauth2client!
+import json
 
-# --- 1. LÓGICA DE LOGIN ---
+# --- 1. CONFIGURACIÓN INICIAL ---
+NOMBRE_GOOGLE_SHEET = "base_datos_cursos" 
+ARCHIVO_PLANTILLA = "plantilla_acta.docx"
+
+# --- 2. AUTENTICACIÓN (MODIFICADA CON LA NUEVA BIBLIOTECA) ---
+@st.cache_resource
+def autorizar_google_sheets():
+    scope = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive.readonly"
+    ]
+    
+    creds_json_string = st.secrets["google_credentials"]
+    creds_dict = json.loads(creds_json_string) 
+    
+    # --- ¡ESTA ES LA LÍNEA QUE CAMBIA! ---
+    # Usamos el nuevo método de gspread que usa google-auth
+    gc = gspread.service_account_from_dict(creds_dict, scopes=scope)
+    return gc
+
+try:
+    gc = autorizar_google_sheets()
+except Exception as e:
+    st.error(f"Error al conectar con Google APIs. ¿Configuraste los 'Secrets'? Detalle: {e}")
+    st.stop()
+    
+# --- FUNCIÓN DE FORMATEO (sin cambios) ---
+def formatear_nota_especial(nota_str):
+    if not nota_str or nota_str.strip() == "":
+        return "AUSENTE"
+    nota_limpia = nota_str.strip().replace(",", ".")
+    try:
+        nota_num = float(nota_limpia)
+    except ValueError:
+        return nota_str.upper()
+
+    parte_entera = int(nota_num)
+    parte_decimal = int(round((nota_num - parte_entera) * 100))
+    try:
+        palabra_entera = num2words(parte_entera, lang='es').capitalize()
+    except Exception:
+        palabra_entera = str(parte_entera)
+
+    if parte_decimal == 0:
+        return f"{parte_entera} ({palabra_entera})"
+    else:
+        nota_formateada_coma = f"{nota_num:.2f}".replace(".", ",")
+        decimal_dos_digitos = f"{parte_decimal:02d}"
+        return f"{nota_formateada_coma} ({palabra_entera}/{decimal_dos_digitos})"
+
+# --- Cargar plantilla (sin cambios) ---
+try:
+    doc = DocxTemplate(ARCHIVO_PLANTILLA)
+except Exception as e:
+    st.error(f"ERROR: No se pudo cargar la plantilla '{ARCHIVO_PLANTILLA}'. {e}")
+    st.stop()
+
+# --- 3. LEER DATOS DESDE GOOGLE SHEETS (sin cambios) ---
+@st.cache_data(ttl=600) 
+def cargar_datos_google_sheets():
+    try:
+        sh = gc.open(NOMBRE_GOOGLE_SHEET)
+        df_cursos = pd.DataFrame(sh.worksheet("Cursos").get_all_records())
+        df_alumnos = pd.DataFrame(sh.worksheet("Alumnos").get_all_records())
+        df_inscripciones = pd.DataFrame(sh.worksheet("Inscripciones").get_all_records())
+        df_cursos = df_cursos.astype(str)
+        df_alumnos = df_alumnos.astype(str)
+        df_inscripciones = df_inscripciones.astype(str)
+        return df_cursos, df_alumnos, df_inscripciones
+    except Exception as e:
+        st.error(f"ERROR: No se pudo leer el Google Sheet '{NOMBRE_GOOGLE_SHEET}'. ¿Lo compartiste con el robot? ¿Están limpias las columnas? Detalle: {e}")
+        st.stop()
+
+df_cursos, df_alumnos, df_inscripciones = cargar_datos_google_sheets()
+
+# --- 4. INTERFAZ DE STREAMLIT (con tu login) ---
 
 def check_login(password):
-    """Compara la contraseña ingresada con el Secret de Streamlit."""
     try:
-        # Obtiene la contraseña de los Secrets
         correct_password = st.secrets["app_password"]
         return password == correct_password
     except KeyError:
-        # Si el secret no está configurado
         st.error("La app no tiene una contraseña de 'secrets' configurada.")
         return False
 
-# Pedir la contraseña en la barra lateral
 st.sidebar.title("Login")
 password_ingresado = st.sidebar.text_input("Ingrese la contraseña de la app:", type="password")
 
-# --- 2. LÓGICA PRINCIPAL DE LA APP ---
-
-# Solo si el login es correcto, ejecutar el resto del código
 if check_login(password_ingresado):
-
-    # --- (Aquí empieza tu código que ya funciona) ---
     
-    # --- CONFIGURACIÓN INICIAL ---
-    NOMBRE_GOOGLE_SHEET = "base_datos_cursos" 
-    ARCHIVO_PLANTILLA = "plantilla_acta.docx"
-
-    # --- AUTENTICACIÓN (SOLO PARA LEER SHEETS) ---
-    @st.cache_resource
-    def autorizar_google_sheets():
-        scope = [
-            "https.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive.readonly"
-        ]
-        creds_json_string = st.secrets["google_credentials"]
-        creds_dict = json.loads(creds_json_string) 
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        gc = gspread.authorize(creds)
-        return gc
-
-    try:
-        gc = autorizar_google_sheets()
-    except Exception as e:
-        st.error(f"Error al conectar con Google APIs. Detalle: {e}")
-        st.stop()
-        
-    # --- FUNCIÓN DE FORMATEO ---
-    def formatear_nota_especial(nota_str):
-        if not nota_str or nota_str.strip() == "":
-            return "AUSENTE"
-        nota_limpia = nota_str.strip().replace(",", ".")
-        try:
-            nota_num = float(nota_limpia)
-        except ValueError:
-            return nota_str.upper()
-
-        parte_entera = int(nota_num)
-        parte_decimal = int(round((nota_num - parte_entera) * 100))
-        try:
-            palabra_entera = num2words(parte_entera, lang='es').capitalize()
-        except Exception:
-            palabra_entera = str(parte_entera)
-
-        if parte_decimal == 0:
-            return f"{parte_entera} ({palabra_entera})"
-        else:
-            nota_formateada_coma = f"{nota_num:.2f}".replace(".", ",")
-            decimal_dos_digitos = f"{parte_decimal:02d}"
-            return f"{nota_formateada_coma} ({palabra_entera}/{decimal_dos_digitos})"
-
-    # --- Cargar plantilla ---
-    try:
-        doc = DocxTemplate(ARCHIVO_PLANTILLA)
-    except Exception as e:
-        st.error(f"ERROR: No se pudo cargar la plantilla '{ARCHIVO_PLANTILLA}'. {e}")
-        st.stop()
-
-    # --- LEER DATOS DESDE GOOGLE SHEETS ---
-    @st.cache_data(ttl=600) 
-    def cargar_datos_google_sheets():
-        try:
-            sh = gc.open(NOMBRE_GOOGLE_SHEET)
-            df_cursos = pd.DataFrame(sh.worksheet("Cursos").get_all_records())
-            df_alumnos = pd.DataFrame(sh.worksheet("Alumnos").get_all_records())
-            df_inscripciones = pd.DataFrame(sh.worksheet("Inscripciones").get_all_records())
-            df_cursos = df_cursos.astype(str)
-            df_alumnos = df_alumnos.astype(str)
-            df_inscripciones = df_inscripciones.astype(str)
-            return df_cursos, df_alumnos, df_inscripciones
-        except Exception as e:
-            st.error(f"ERROR: No se pudo leer el Google Sheet. Detalle: {e}")
-            st.stop()
-
-    df_cursos, df_alumnos, df_inscripciones = cargar_datos_google_sheets()
-
-    # --- INTERFAZ DE STREAMLIT ---
     st.title("🚀 Generador de Actas de Examen")
 
     st.sidebar.markdown("## Datos del Acta")
@@ -132,7 +128,7 @@ if check_login(password_ingresado):
             materias_del_curso
         )
 
-    # --- FILTRAR ALUMNOS (Lógica de Grupo) ---
+    # --- 5. FILTRAR ALUMNOS (sin cambios) ---
     if curso_seleccionado_nombre and asignatura_seleccionada:
         
         try:
@@ -154,14 +150,14 @@ if check_login(password_ingresado):
         lista_grupos = grupos_inscriptos_df['Grupo'].unique()
         
         if len(lista_grupos) == 0:
-            st.warning(f"No hay 'Grupo' inscripto a este curso (ID: {id_curso_seleccionado}).")
+            st.warning(f"No hay ningún 'Grupo' inscripto a este curso (ID: {id_curso_seleccionado}) en la hoja 'Inscripciones'.")
             st.stop()
 
         alumnos_del_curso = df_alumnos[df_alumnos['Grupo'].isin(lista_grupos)].copy()
         alumnos_del_curso = alumnos_del_curso.drop_duplicates(subset=['DNI'])
 
         if alumnos_del_curso.empty:
-            st.warning(f"Se encontraron grupos ({', '.join(lista_grupos)}) pero no hay alumnos en ellos.")
+            st.warning(f"Se encontraron grupos ({', '.join(lista_grupos)}) pero no hay alumnos en la hoja 'Alumnos' que pertenezcan a ellos.")
         else:
             with st.form("notas_form"):
                 notas_ingresadas = {}
@@ -175,7 +171,7 @@ if check_login(password_ingresado):
 
                 submitted = st.form_submit_button("Generar Acta para Descargar")
 
-    # --- LÓGICA DE GENERACIÓN ---
+    # --- 6. LÓGICA DE GENERACIÓN (sin cambios) ---
     if 'submitted' in locals() and submitted:
         
         context = info_curso_dict
@@ -214,15 +210,10 @@ if check_login(password_ingresado):
             st.error(f"ERROR: Ocurrió un problema al 'renderizar' el archivo.")
             st.error(f"Detalle: {e}")
 
-# --- 3. MENSAJES DE ERROR DE LOGIN ---
-
 elif password_ingresado != "":
-    # Si escribió algo, pero es incorrecto
     st.sidebar.error("Contraseña incorrecta.")
     st.error("Acceso Denegado 🔒")
-    st.info("La contraseña ingresada es incorrecta. Revísala en la barra lateral.")
 
 else:
-    # Si no ha escrito nada
     st.sidebar.warning("Ingrese la contraseña para usar la app.")
     st.info("Bienvenido. Por favor, ingrese la contraseña en la barra lateral para activar el generador de actas.")
