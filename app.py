@@ -23,7 +23,7 @@ ARCHIVO_PLANTILLA = "plantilla_acta.docx"
 def autorizar_google_sheets():
     scope = [
         "https://www.googleapis.com/auth/spreadsheets",
-        # "https://www.googleapis.com/auth/drive" - Ya no se necesita
+		"https://www.googleapis.com/auth/drive.readonly"
     ]
     creds_json_string = st.secrets["google_credentials"]
     creds_dict = json.loads(creds_json_string) 
