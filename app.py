@@ -8,39 +8,36 @@ from num2words import num2words
 import datetime
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from pydrive2.auth import GoogleAuth
-from pydrive2.drive import GoogleDrive
+# import pydrive2 - Ya no se necesita
+# from pydrive2.auth import GoogleAuth - Ya no se necesita
+# from pydrive2.drive import GoogleDrive - Ya no se necesita
 import json
 
 # --- 1. CONFIGURACIÓN INICIAL ---
-# (Recuerda cambiar el ID de la carpeta)
 NOMBRE_GOOGLE_SHEET = "base_datos_cursos" 
 ARCHIVO_PLANTILLA = "plantilla_acta.docx"
-ID_CARPETA_DRIVE_SALIDA = "1rd4YqqvlOhn3Itz832sBiMjpWp31WZWY" # (Este es tu ID de carpeta)
+# ID_CARPETA_DRIVE_SALIDA = "..." - Ya no se necesita
 
-# --- 2. AUTENTICACIÓN CON GOOGLE ---
+# --- 2. AUTENTICACIÓN (SOLO PARA LEER SHEETS) ---
 @st.cache_resource
-def autorizar_google_apis():
+def autorizar_google_sheets():
     scope = [
         "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive"
+        # "https://www.googleapis.com/auth/drive" - Ya no se necesita
     ]
     creds_json_string = st.secrets["google_credentials"]
     creds_dict = json.loads(creds_json_string) 
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     gc = gspread.authorize(creds)
-    gauth = GoogleAuth()
-    gauth.credentials = creds
-    drive = GoogleDrive(gauth)
-    return gc, drive
+    return gc
 
 try:
-    gc, drive = autorizar_google_apis()
+    gc = autorizar_google_sheets()
 except Exception as e:
     st.error(f"Error al conectar con Google APIs. ¿Configuraste los 'Secrets'? Detalle: {e}")
     st.stop()
     
-# --- FUNCIÓN DE FORMATEO ---
+# --- FUNCIÓN DE FORMATEO (sin cambios) ---
 def formatear_nota_especial(nota_str):
     if not nota_str or nota_str.strip() == "":
         return "AUSENTE"
@@ -64,14 +61,14 @@ def formatear_nota_especial(nota_str):
         decimal_dos_digitos = f"{parte_decimal:02d}"
         return f"{nota_formateada_coma} ({palabra_entera}/{decimal_dos_digitos})"
 
-# --- Cargar plantilla ---
+# --- Cargar plantilla (sin cambios) ---
 try:
     doc = DocxTemplate(ARCHIVO_PLANTILLA)
 except Exception as e:
     st.error(f"ERROR: No se pudo cargar la plantilla '{ARCHIVO_PLANTILLA}'. {e}")
     st.stop()
 
-# --- 3. LEER DATOS DESDE GOOGLE SHEETS ---
+# --- 3. LEER DATOS DESDE GOOGLE SHEETS (sin cambios) ---
 @st.cache_data(ttl=600) 
 def cargar_datos_google_sheets():
     try:
@@ -89,7 +86,7 @@ def cargar_datos_google_sheets():
 
 df_cursos, df_alumnos, df_inscripciones = cargar_datos_google_sheets()
 
-# --- 4. INTERFAZ DE STREAMLIT ---
+# --- 4. INTERFAZ DE STREAMLIT (sin cambios) ---
 st.title("🚀 Generador de Actas de Examen")
 
 st.sidebar.markdown("## Datos del Acta")
@@ -118,7 +115,7 @@ if curso_seleccionado_nombre:
         materias_del_curso
     )
 
-# --- 5. FILTRAR ALUMNOS (Lógica de Grupo) ---
+# --- 5. FILTRAR ALUMNOS (sin cambios) ---
 if curso_seleccionado_nombre and asignatura_seleccionada:
     
     try:
@@ -159,9 +156,10 @@ if curso_seleccionado_nombre and asignatura_seleccionada:
                 nota = st.text_input(f"Nota para: **{nombre}** (DNI: {dni})", key=dni)
                 notas_ingresadas[dni] = nota
 
-            submitted = st.form_submit_button("Generar Acta y Subir a Drive")
+            # Botón modificado
+            submitted = st.form_submit_button("Generar Acta para Descargar")
 
-# --- 6. LÓGICA DE GENERACIÓN (MODIFICADA CON DESCARGA) ---
+# --- 6. LÓGICA DE GENERACIÓN (MODIFICADA) ---
 if 'submitted' in locals() and submitted:
     
     context = info_curso_dict
@@ -187,26 +185,14 @@ if 'submitted' in locals() and submitted:
         
         nombre_archivo = f"ACTA_{info_curso_dict.get('Asignatura', 'CURSO')}_{id_curso_seleccionado}.docx"
         
-        # --- 1. Subir el archivo a Google Drive ---
-        with st.spinner(f"Subiendo '{nombre_archivo}' a Google Drive..."):
-            drive_file = drive.CreateFile({
-                'title': nombre_archivo,
-                'parents': [{'id': ID_CARPETA_DRIVE_SALIDA}],
-                'mimeType': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-            })
-            
-            drive_file.content = file_buffer
-            drive_file.Upload()
-        
-        st.success(f"✅ ¡Éxito! Se guardó '{nombre_archivo}' en tu carpeta de Google Drive.")
+        # --- 1. Subir a Drive (ELIMINADO) ---
+        # (Se eliminó todo el bloque 'with st.spinner(...)')
 
-        # --- 2. ¡NUEVO! Ofrecer la descarga local ---
-        
-        # Rebobinamos el buffer otra vez, porque la subida lo "consumió"
-        file_buffer.seek(0) 
+        # --- 2. Ofrecer la descarga local ---
+        st.success(f"✅ ¡Acta generada! Haz clic para descargar.")
         
         st.download_button(
-            label=f"Descargar '{nombre_archivo}' a tu PC", # Botón de descarga
+            label=f"Descargar '{nombre_archivo}' a tu PC",
             data=file_buffer,
             file_name=nombre_archivo,
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -215,5 +201,5 @@ if 'submitted' in locals() and submitted:
         st.balloons() # ¡Celebración!
 
     except Exception as e:
-        st.error(f"ERROR: Ocurrió un problema al 'renderizar' o 'subir' el archivo.")
+        st.error(f"ERROR: Ocurrió un problema al 'renderizar' el archivo.")
         st.error(f"Detalle: {e}")
