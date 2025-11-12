@@ -105,7 +105,7 @@ if check_login(password_ingresado):
     st.sidebar.markdown("## Datos del Acta")
     tipo_seleccionado = st.sidebar.radio(
         "1. Seleccione el tipo de acta:",
-        ("Final", "Parcial") 
+        ("FINAL", "PARCIAL") 
     )
     fecha_examen_seleccionada = st.sidebar.date_input(
         "2. Seleccione la Fecha del Examen",
